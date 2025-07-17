@@ -1,8 +1,8 @@
-using joptan
+using Joptan
 using Test
 
-@testset "joptan.jl" begin
+@testset "Joptan.jl" begin
     # Write your tests here.
-    @test joptan.greet_your_package_name() == "Hello YourPackageName!"
-    @test joptan.greet_your_package_name() != "Hello world!"
+    @test Joptan.greet_your_package_name() == "Hello YourPackageName!"
+    @test Joptan.greet_your_package_name() != "Hello world!"
 end
