@@ -207,7 +207,7 @@ function check_convergence(optimizer::AbstractOptimizer)
     # Check tolerance
     tolerance_met = false
     if optimizer.tolerance > 0 && optimizer.x_old_tol !== nothing
-        tolerance_met = norm(optimizer.x - optimizer.x_old_tol) < optimizer.tolerance
+        tolerance_met = LinearAlgebra.norm(optimizer.x - optimizer.x_old_tol) < optimizer.tolerance
     end
     
     return no_it_left || no_time_left || tolerance_met
@@ -323,7 +323,7 @@ function run!(optimizer::Optimizer, x0::Vector{Float64};
         # Print progress
         if verbose && (optimizer.it % 100 == 0 || optimizer.it == 1)
             current_loss = optimizer.loss_func(optimizer.x)
-            current_grad_norm = norm(optimizer.grad_func(optimizer.x))
+            current_grad_norm = LinearAlgebra.norm(optimizer.grad_func(optimizer.x))
             println("Iter $(optimizer.it): loss = $(round(current_loss, digits=6)), " *
                    "||∇f|| = $(round(current_grad_norm, digits=6))")
         end
@@ -335,7 +335,7 @@ function run!(optimizer::Optimizer, x0::Vector{Float64};
     
     if verbose
         final_loss = optimizer.loss_func(optimizer.x)
-        final_grad_norm = norm(optimizer.grad_func(optimizer.x))
+        final_grad_norm = LinearAlgebra.norm(optimizer.grad_func(optimizer.x))
         println("Optimization completed!")
         println("Final loss: $(round(final_loss, digits=6))")
         println("Final gradient norm: $(round(final_grad_norm, digits=6))")

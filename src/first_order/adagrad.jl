@@ -275,7 +275,7 @@ function run!(adagrad::AdagradOptimizer, x0::Vector{Float64};
         # Print progress
         if verbose && (adagrad.optimizer.it % 100 == 0 || adagrad.optimizer.it == 1)
             current_loss = adagrad.optimizer.loss_func(adagrad.optimizer.x)
-            current_grad_norm = norm(adagrad.optimizer.grad_func(adagrad.optimizer.x))
+            current_grad_norm = LinearAlgebra.norm(adagrad.optimizer.grad_func(adagrad.optimizer.x))
             println("Iter $(adagrad.optimizer.it): loss = $(round(current_loss, digits=6)), " *
                    "||∇f|| = $(round(current_grad_norm, digits=6))")
         end
@@ -287,7 +287,7 @@ function run!(adagrad::AdagradOptimizer, x0::Vector{Float64};
     
     if verbose
         final_loss = adagrad.optimizer.loss_func(adagrad.optimizer.x)
-        final_grad_norm = norm(adagrad.optimizer.grad_func(adagrad.optimizer.x))
+        final_grad_norm = LinearAlgebra.norm(adagrad.optimizer.grad_func(adagrad.optimizer.x))
         println("Optimization completed!")
         println("Final loss: $(round(final_loss, digits=6))")
         println("Final gradient norm: $(round(final_grad_norm, digits=6))")

@@ -39,5 +39,4 @@ export rastrigin, rastrigin_gradient, rastrigin_hessian
 # Export linear regression functions
 export LinearRegressionOracle, LinearRegressionLoss
 export mat_vec_product, stochastic_gradient
-# export linear_regression_simple, linear_regression_gradient_simple, linear_regression_hessian_simple
 export linear_regression_loss, linear_regression_gradient, linear_regression_hessian

@@ -383,7 +383,7 @@ function test_linear_regression()
     println("- True parameter norm: $(round(norm(x_true), digits=4))")
     
     # Create loss functions
-    lrl = LinearRegressionLoss(A, b, l2=0.01)
+    lrl = LinearRegressionOracle(A, b, l2=0.01)
     loss_func = x -> linear_regression_loss(lrl, x)
     grad_func = x -> linear_regression_gradient(lrl, x)
     

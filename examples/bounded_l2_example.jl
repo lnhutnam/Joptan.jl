@@ -1,8 +1,8 @@
 """
 Example: Bounded L2 Regularization with Linear Regression
 
-This example demonstrates how to use the BoundedL2Regularizer with the 
-LinearRegressionOracle for nonconvex regularized optimization.
+This example demonstrates how to use the BoundedL2Regularizer with linear regression
+for nonconvex regularized optimization.
 """
 
 using LinearAlgebra
@@ -38,21 +38,65 @@ function generate_test_data(n::Int, d::Int; noise_std::Float64=0.1, sparsity::Fl
 end
 
 """
+    BoundedL2LinearRegression
+
+A simple struct that combines linear regression with bounded L2 regularization.
+This avoids the type conversion issues with the Oracle system.
+"""
+struct BoundedL2LinearRegression
+    A::Matrix{Float64}
+    b::Vector{Float64}
+    regularizer::BoundedL2Regularizer
+    n::Int
+    d::Int
+end
+
+function BoundedL2LinearRegression(A::Matrix{Float64}, b::Vector{Float64}, coef::Float64)
+    n, d = size(A)
+    regularizer = BoundedL2Regularizer(coef)
+    return BoundedL2LinearRegression(A, b, regularizer, n, d)
+end
+
+# Implement oracle interface
+function value(oracle::BoundedL2LinearRegression, x::Vector{Float64})
+    # Linear regression loss
+    residual = oracle.A * x - oracle.b
+    base_loss = 0.5 * LinearAlgebra.norm(residual)^2 / oracle.n
+    
+    # Add bounded L2 regularization
+    reg_loss = value(oracle.regularizer, x)
+    
+    return base_loss + reg_loss
+end
+
+function gradient(oracle::BoundedL2LinearRegression, x::Vector{Float64})
+    # Linear regression gradient
+    residual = oracle.A * x - oracle.b
+    base_grad = oracle.A' * residual / oracle.n
+    
+    # Add bounded L2 gradient
+    reg_grad = gradient(oracle.regularizer, x)
+    
+    return base_grad + reg_grad
+end
+
+function hessian(oracle::BoundedL2LinearRegression, x::Vector{Float64})
+    # Linear regression Hessian
+    base_hessian = oracle.A' * oracle.A / oracle.n
+    
+    # Add bounded L2 Hessian
+    reg_hessian = hessian(oracle.regularizer, x)
+    
+    return base_hessian + reg_hessian
+end
+
+"""
     create_oracle_with_bounded_l2(A, b, coef::Float64)
 
-Create a LinearRegressionOracle with BoundedL2Regularizer.
-Now that BoundedL2Regularizer follows the same interface as Regularizer,
-it can be used directly with the oracle system.
+Create a BoundedL2LinearRegression oracle.
 """
 function create_oracle_with_bounded_l2(A, b, coef::Float64)
-    # Create the bounded L2 regularizer
-    bounded_l2_reg = BoundedL2Regularizer(coef)
-    
-    # Create linear regression oracle and set the regularizer
-    lro = LinearRegressionOracle(A, b)
-    lro.oracle.regularizer = bounded_l2_reg
-    
-    return lro
+    return BoundedL2LinearRegression(A, b, coef)
 end
 
 """
@@ -133,27 +177,27 @@ function compare_regularizers()
     for reg_info in regularizers
         if length(reg_info) == 2
             # No regularization
-            lro = LinearRegressionOracle(A, b)
+            oracle = LinearRegressionOracle(A, b)
             x_sol = (A' * A) \ (A' * b)  # Analytical solution
         else
             reg_name, coef, reg_type = reg_info
             
             if reg_type == "l2"
-                lro = LinearRegressionOracle(A, b, l2=coef)
+                oracle = LinearRegressionOracle(A, b, l2=coef)
                 x_sol = (A' * A + coef * I(d)) \ (A' * b)  # Ridge solution
             elseif reg_type == "l1"
-                lro = LinearRegressionOracle(A, b, l1=coef)
+                oracle = LinearRegressionOracle(A, b, l1=coef)
                 # Use gradient descent for L1
-                x_sol = optimize_with_gradient_descent(lro, zeros(d), lr=0.01, max_iter=2000)
+                x_sol = optimize_with_gradient_descent(oracle, zeros(d), lr=0.01, max_iter=2000)
             elseif reg_type == "bounded_l2"
-                lro = create_oracle_with_bounded_l2(A, b, coef)
+                oracle = create_oracle_with_bounded_l2(A, b, coef)
                 # Use gradient descent for bounded L2
-                x_sol = optimize_with_gradient_descent(lro, zeros(d), lr=0.01, max_iter=2000)
+                x_sol = optimize_with_gradient_descent(oracle, zeros(d), lr=0.01, max_iter=2000)
             end
         end
         
         # Compute metrics
-        loss_val = value(lro, x_sol)
+        loss_val = value(oracle, x_sol)
         param_norm = LinearAlgebra.norm(x_sol)
         sparsity = sum(abs.(x_sol) .< 1e-3)
         error = LinearAlgebra.norm(x_sol - x_true)
@@ -277,12 +321,12 @@ function optimization_comparison()
     
     for coef in coefs
         # L2 regularization
-        lro_l2 = LinearRegressionOracle(A, b, l2=coef)
-        x_l2, hist_l2 = optimize_with_history(lro_l2, zeros(d))
+        oracle_l2 = LinearRegressionOracle(A, b, l2=coef)
+        x_l2, hist_l2 = optimize_with_history(oracle_l2, zeros(d))
         
         # Bounded L2 regularization
-        lro_bounded = create_oracle_with_bounded_l2(A, b, coef)
-        x_bounded, hist_bounded = optimize_with_history(lro_bounded, zeros(d))
+        oracle_bounded = create_oracle_with_bounded_l2(A, b, coef)
+        x_bounded, hist_bounded = optimize_with_history(oracle_bounded, zeros(d))
         
         # Print results
         println("$(coef)\tL2\t\t\t$(round(hist_l2[end][2], digits=6))\t\t$(length(hist_l2))\t\t$(round(LinearAlgebra.norm(x_l2 - x_true), digits=4))")

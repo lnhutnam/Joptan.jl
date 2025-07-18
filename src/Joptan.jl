@@ -44,7 +44,6 @@ export LinearRegressionLoss
 export linear_regression_loss, linear_regression_gradient, linear_regression_hessian
 export linear_regression_stochastic_gradient
 export linear_regression_smoothness, linear_regression_max_smoothness, linear_regression_average_smoothness
-export linear_regression_simple, linear_regression_gradient_simple, linear_regression_hessian_simple
 
 # Export first-order optimization algorithms
 export AdagradOptimizer, AdagradStochasticOptimizer

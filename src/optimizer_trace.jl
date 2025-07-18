@@ -78,7 +78,7 @@ function compute_grad_norms!(trace::OptimizationTrace)
     end
     
     if !trace.grad_norms_computed
-        trace.grad_norms = [norm(trace.grad_func(x)) for x in trace.xs]
+        trace.grad_norms = [LinearAlgebra.norm(trace.grad_func(x)) for x in trace.xs]
         trace.grad_norms_computed = true
     end
 end
