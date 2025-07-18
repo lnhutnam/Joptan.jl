@@ -75,7 +75,7 @@ function demonstrate_basic_linear_regression()
     A, b, x_true = generate_regression_data(n, d)
     
     # Create linear regression oracle
-    lro = LinearRegressionOracle(A, b)
+    lro = Joptan.LinearRegressionOracle(A, b)
     
     # Test point
     x_test = zeros(d)
