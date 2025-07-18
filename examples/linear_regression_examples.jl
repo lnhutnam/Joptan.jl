@@ -10,7 +10,10 @@ using LinearAlgebra
 using Plots
 using Random
 using Statistics
-using Distributions
+using StatsBase
+
+# Import norm explicitly to avoid conflicts
+import LinearAlgebra: norm
 
 # Set random seed for reproducibility
 Random.seed!(42)
@@ -27,8 +30,8 @@ function generate_regression_data(n::Int, d::Int; noise_std::Float64=0.1, condit
     - condition_number: Condition number of the design matrix
     
     Returns:
-    - A: Design matrix ($n \times d$)
-    - b: Target vector ($n \times 1$)
+    - A: Design matrix (n × d)
+    - b: Target vector (n × 1)
     - x_true: True parameters used to generate data
     """
     println("Generating synthetic regression data...")
@@ -42,8 +45,14 @@ function generate_regression_data(n::Int, d::Int; noise_std::Float64=0.1, condit
     if condition_number > 1.0
         # Create matrix with specified condition number
         U, _, V = svd(randn(n, d))
-        singular_values = exp.(range(0, log(condition_number), length=min(n, d)))
-        A = U[:, 1:d] * Diagonal(singular_values) * V'
+        min_dim = min(n, d)
+        singular_values = exp.(range(0, log(condition_number), length=min_dim))
+        if d <= n
+            A = U[:, 1:d] * Diagonal(singular_values) * V'
+        else
+            # Handle case where d > n
+            A = U * Diagonal(singular_values) * V[:, 1:min_dim]'
+        end
     else
         A = randn(n, d)
     end
@@ -51,7 +60,7 @@ function generate_regression_data(n::Int, d::Int; noise_std::Float64=0.1, condit
     # Generate targets with noise
     b = A * x_true + noise_std * randn(n)
     
-    println("  True parameter norm: $(round(norm(x_true), digits=4))")
+    println("  True parameter norm: $(round(LinearAlgebra.norm(x_true), digits=4))")
     println("  Actual condition number: $(round(cond(A), digits=2))")
     
     return A, b, x_true
@@ -65,33 +74,33 @@ function demonstrate_basic_linear_regression()
     n, d = 100, 5
     A, b, x_true = generate_regression_data(n, d)
     
-    # Create linear regression loss object
-    lrl = LinearRegressionLoss(A, b)
+    # Create linear regression oracle
+    lro = LinearRegressionOracle(A, b)
     
     # Test point
     x_test = zeros(d)
     
-    # Compute loss, gradient, and Hessian
-    loss_val = linear_regression_loss(lrl, x_test)
-    grad_val = linear_regression_gradient(lrl, x_test)
-    hess_val = linear_regression_hessian(lrl, x_test)
+    # Compute loss, gradient, and Hessian using oracle methods
+    loss_val = value(lro, x_test)
+    grad_val = gradient(lro, x_test)
+    hess_val = hessian(lro, x_test)
     
     println("At x = zeros:")
     println("  Loss: $(round(loss_val, digits=6))")
-    println("  Gradient norm: $(round(norm(grad_val), digits=6))")
+    println("  Gradient norm: $(round(LinearAlgebra.norm(grad_val), digits=6))")
     println("  Hessian condition number: $(round(cond(hess_val), digits=2))")
     
     # Analytical solution (ordinary least squares)
     x_ols = (A' * A) \ (A' * b)
-    loss_ols = linear_regression_loss(lrl, x_ols)
-    grad_ols = linear_regression_gradient(lrl, x_ols)
+    loss_ols = value(lro, x_ols)
+    grad_ols = gradient(lro, x_ols)
     
     println("\nOLS solution:")
     println("  Loss: $(round(loss_ols, digits=6))")
-    println("  Gradient norm: $(round(norm(grad_ols), digits=6))")
-    println("  Distance to true params: $(round(norm(x_ols - x_true), digits=6))")
+    println("  Gradient norm: $(round(LinearAlgebra.norm(grad_ols), digits=6))")
+    println("  Distance to true params: $(round(LinearAlgebra.norm(x_ols - x_true), digits=6))")
     
-    return lrl, x_ols, x_true
+    return lro, x_ols, x_true
 end
 
 # Demonstrate regularized linear regression
@@ -112,15 +121,15 @@ function demonstrate_regularized_regression()
     solutions = []
     
     for l2 in regularization_strengths
-        lrl = LinearRegressionLoss(A, b, l2=l2)
+        lro = LinearRegressionOracle(A, b, l2=l2)
         
         # Analytical solution for Ridge regression
         x_ridge = (A' * A + l2 * I(d)) \ (A' * b)
         
-        loss_val = linear_regression_loss(lrl, x_ridge)
-        grad_val = linear_regression_gradient(lrl, x_ridge)
+        loss_val = value(lro, x_ridge)
+        grad_val = gradient(lro, x_ridge)
         
-        println("$(l2)\t\t$(round(loss_val, digits=6))\t$(round(norm(x_ridge), digits=4))\t\t$(round(norm(grad_val), digits=6))")
+        println("$(l2)\t\t$(round(loss_val, digits=6))\t$(round(LinearAlgebra.norm(x_ridge), digits=4))\t\t$(round(LinearAlgebra.norm(grad_val), digits=6))")
         
         push!(solutions, (l2, x_ridge, loss_val))
     end
@@ -130,18 +139,18 @@ function demonstrate_regularized_regression()
     l1_strengths = [0.1, 1.0, 10.0]
     
     for l1 in l1_strengths
-        lrl = LinearRegressionLoss(A, b, l1=l1)
+        lro = LinearRegressionOracle(A, b, l1=l1)
         
         # Simple gradient descent for Lasso (subgradient method)
         x = zeros(d)
         lr = 0.01
         
         for i in 1:1000
-            grad = linear_regression_gradient(lrl, x)
+            grad = gradient(lro, x)
             x = x - lr * grad
             
             if i % 200 == 0
-                loss_val = linear_regression_loss(lrl, x)
+                loss_val = value(lro, x)
                 println("  λ₁=$(l1), iter=$i: loss=$(round(loss_val, digits=6)), sparsity=$(sum(abs.(x) .< 1e-3))/$(d)")
             end
         end
@@ -158,7 +167,7 @@ function demonstrate_gradient_descent()
     n, d = 200, 10
     A, b, x_true = generate_regression_data(n, d, condition_number=5.0)
     
-    lrl = LinearRegressionLoss(A, b, l2=0.1)
+    lro = LinearRegressionOracle(A, b, l2=0.1)
     
     # Gradient descent
     x = randn(d)  # Random initialization
@@ -173,11 +182,11 @@ function demonstrate_gradient_descent()
     println("-" ^ 50)
     
     for i in 1:max_iter
-        loss_val = linear_regression_loss(lrl, x)
-        grad_val = linear_regression_gradient(lrl, x)
-        grad_norm = norm(grad_val)
+        loss_val = value(lro, x)
+        grad_val = gradient(lro, x)
+        grad_norm = LinearAlgebra.norm(grad_val)
         
-        push!(history, (i, loss_val, grad_norm, norm(x - x_true)))
+        push!(history, (i, loss_val, grad_norm, LinearAlgebra.norm(x - x_true)))
         
         if i % 100 == 0 || i == 1
             println("$i\t\t$(round(loss_val, digits=6))\t$(round(grad_norm, digits=6))\t$(lr)")
@@ -194,9 +203,9 @@ function demonstrate_gradient_descent()
     end
     
     # Final results
-    final_loss = linear_regression_loss(lrl, x)
-    final_grad_norm = norm(linear_regression_gradient(lrl, x))
-    distance_to_true = norm(x - x_true)
+    final_loss = value(lro, x)
+    final_grad_norm = LinearAlgebra.norm(gradient(lro, x))
+    distance_to_true = LinearAlgebra.norm(x - x_true)
     
     println("\nFinal results:")
     println("  Loss: $(round(final_loss, digits=6))")
@@ -214,7 +223,7 @@ function demonstrate_stochastic_gradient_descent()
     n, d = 1000, 20
     A, b, x_true = generate_regression_data(n, d)
     
-    lrl = LinearRegressionLoss(A, b, l2=0.01)
+    lro = LinearRegressionOracle(A, b, l2=0.01)
     
     # SGD parameters
     x = randn(d)
@@ -232,16 +241,16 @@ function demonstrate_stochastic_gradient_descent()
     for i in 1:max_iter
         # Compute full loss and gradient for monitoring
         if i % 200 == 0 || i == 1
-            loss_val = linear_regression_loss(lrl, x)
-            grad_val = linear_regression_gradient(lrl, x)
-            grad_norm = norm(grad_val)
+            loss_val = value(lro, x)
+            grad_val = gradient(lro, x)
+            grad_norm = LinearAlgebra.norm(grad_val)
             
             push!(history_sgd, (i, loss_val, grad_norm))
             println("$i\t\t$(round(loss_val, digits=6))\t$(round(grad_norm, digits=6))")
         end
         
         # Stochastic gradient step
-        stoch_grad = linear_regression_stochastic_gradient(lrl, x, batch_size=batch_size)
+        stoch_grad = stochastic_gradient(lro, x, nothing, batch_size=batch_size)
         x = x - lr * stoch_grad
         
         # Decay learning rate
@@ -251,8 +260,8 @@ function demonstrate_stochastic_gradient_descent()
     end
     
     # Final results
-    final_loss = linear_regression_loss(lrl, x)
-    distance_to_true = norm(x - x_true)
+    final_loss = value(lro, x)
+    distance_to_true = LinearAlgebra.norm(x - x_true)
     
     println("\nSGD final results:")
     println("  Loss: $(round(final_loss, digits=6))")
@@ -316,7 +325,7 @@ function compare_optimization_methods()
     println("-" ^ 65)
     
     for (method_name, lr, l2) in methods
-        lrl = LinearRegressionLoss(A, b, l2=l2)
+        lro = LinearRegressionOracle(A, b, l2=l2)
         
         time_taken = @elapsed begin
             if method_name == "Analytical (OLS)"
@@ -329,18 +338,18 @@ function compare_optimization_methods()
                 # Gradient descent
                 x_sol = randn(d)
                 for i in 1:1000
-                    grad = linear_regression_gradient(lrl, x_sol)
+                    grad = gradient(lro, x_sol)
                     x_sol = x_sol - lr * grad
                     
-                    if norm(grad) < 1e-6
+                    if LinearAlgebra.norm(grad) < 1e-6
                         break
                     end
                 end
             end
         end
         
-        final_loss = linear_regression_loss(lrl, x_sol)
-        distance_to_true = norm(x_sol - x_true)
+        final_loss = value(lro, x_sol)
+        distance_to_true = LinearAlgebra.norm(x_sol - x_true)
         
         println("$method_name\t\t$(round(final_loss, digits=6))\t$(round(distance_to_true, digits=6))\t\t$(round(time_taken*1000, digits=2))")
         
@@ -363,21 +372,14 @@ function demonstrate_smoothness_properties()
     
     for cond_num in condition_numbers
         A, b, _ = generate_regression_data(n, d, condition_number=cond_num)
-        lrl = LinearRegressionLoss(A, b, l2=0.1)
+        lro = LinearRegressionOracle(A, b, l2=0.1)
         
-        smoothness = linear_regression_smoothness(lrl)
-        max_smooth = linear_regression_max_smoothness(lrl)
-        avg_smooth = linear_regression_average_smoothness(lrl)
+        smooth_val = smoothness(lro)
+        max_smooth = max_smoothness(lro)
+        avg_smooth = average_smoothness(lro)
         
-        println("$(cond_num)\t\t\t$(round(smoothness, digits=4))\t\t$(round(max_smooth, digits=4))\t\t$(round(avg_smooth, digits=4))")
+        println("$(cond_num)\t\t\t$(round(smooth_val, digits=4))\t\t$(round(max_smooth, digits=4))\t\t$(round(avg_smooth, digits=4))")
     end
-    
-    # println("\nSmoothness properties explanation:")
-    # println("- Smoothness: Largest eigenvalue of A'A/n + λ₂")
-    # println("- Max Smoothness: Maximum row norm squared of A + λ₂")
-    # println("- Avg Smoothness: Average row norm squared of A + λ₂")
-    # println("- Higher condition numbers lead to higher smoothness constants")
-    # println("- This affects the optimal step size for gradient descent")
 end
 
 # Test with real-world-like data
@@ -395,7 +397,7 @@ function test_with_realistic_data()
     
     # Create sparse true parameters
     x_true = zeros(d)
-    sparse_indices = sample(1:d, 10, replace=false)
+    sparse_indices = StatsBase.sample(1:d, 10, replace=false)
     x_true[sparse_indices] = randn(10)
     
     # Generate targets
@@ -418,14 +420,14 @@ function test_with_realistic_data()
     println("-" ^ 50)
     
     for (method_name, l1, l2) in methods
-        lrl = LinearRegressionLoss(A, b, l1=l1, l2=l2)
+        lro = LinearRegressionOracle(A, b, l1=l1, l2=l2)
         
         # Use gradient descent (subgradient for L1)
         x = zeros(d)
         lr = 0.001
         
         for i in 1:2000
-            grad = linear_regression_gradient(lrl, x)
+            grad = gradient(lro, x)
             x = x - lr * grad
             
             # Simple thresholding for L1 (crude but effective)
@@ -435,9 +437,9 @@ function test_with_realistic_data()
             end
         end
         
-        final_loss = linear_regression_loss(lrl, x)
+        final_loss = value(lro, x)
         sparsity = sum(abs.(x) .< 1e-3)
-        error = norm(x - x_true)
+        error = LinearAlgebra.norm(x - x_true)
         
         println("$method_name\t\t$(round(final_loss, digits=6))\t$(sparsity)/$(d)\t\t$(round(error, digits=4))")
     end
@@ -449,7 +451,7 @@ function main()
     println("=" ^ 50)
     
     # Basic demonstration
-    lrl, x_ols, x_true = demonstrate_basic_linear_regression()
+    lro, x_ols, x_true = demonstrate_basic_linear_regression()
     
     # Regularized regression
     solutions = demonstrate_regularized_regression()
@@ -464,6 +466,11 @@ function main()
     try
         p_gd = visualize_convergence(history_gd, "Gradient Descent")
         p_sgd = visualize_convergence(history_sgd, "Stochastic Gradient Descent")
+        
+        # Create examples directory if it doesn't exist
+        if !isdir("examples")
+            mkdir("examples")
+        end
         
         # Save plots
         savefig(p_gd, "examples/linear_regression_gd_convergence.png")
@@ -483,25 +490,7 @@ function main()
     # Test with realistic data
     test_with_realistic_data()
     
-    # # Summary
-    # # println("\n" * "=" * 50)
-    # println("Linear Regression Loss Function Summary:")
-    # println("- Basic loss: (1/2n)||Ax - b||² + λ₁||x||₁ + (λ₂/2)||x||²")
-    # println("- Gradient: (1/n)A'(Ax - b) + λ₁sign(x) + λ₂x")
-    # println("- Hessian: (1/n)A'A + λ₂I")
-    # println("- Supports L1 (Lasso) and L2 (Ridge) regularization")
-    # println("- Includes stochastic gradient computation")
-    # println("- Provides smoothness constants for convergence analysis")
-    # println("- Suitable for both small and large-scale problems")
-    
-    # println("\nKey insights:")
-    # println("- L2 regularization helps with ill-conditioned problems")
-    # println("- L1 regularization promotes sparsity")
-    # println("- Stochastic methods scale better to large datasets")
-    # println("- Condition number affects convergence rate")
-    # println("- Analytical solutions available for unregularized/Ridge cases")
-    
-    # println("\nExample completed successfully!")
+    println("\nExample completed successfully!")
 end
 
 # Test the simple functions
@@ -513,10 +502,13 @@ function test_simple_functions()
     b = [1.0, 2.0, 3.0]
     x = [0.5, -0.5]
     
-    # Test simple functions
-    loss_val = Joptan.linear_regression_simple(A, b, x)
-    grad_val = Joptan.linear_regression_gradient_simple(A, b, x)
-    hess_val = Joptan.linear_regression_hessian_simple(A, b, x)
+    # Test simple functions using the oracle
+    lro_no_reg = LinearRegressionOracle(A, b)
+    lro_reg = LinearRegressionOracle(A, b, l1=0.1, l2=0.1)
+    
+    loss_val = value(lro_no_reg, x)
+    grad_val = gradient(lro_no_reg, x)
+    hess_val = hessian(lro_no_reg, x)
     
     println("Simple function test:")
     println("  A = $A")
@@ -527,16 +519,28 @@ function test_simple_functions()
     println("  Hessian: $hess_val")
     
     # Test with regularization
-    loss_reg = Joptan.linear_regression_simple(A, b, x, l1=0.1, l2=0.1)
-    grad_reg = Joptan.linear_regression_gradient_simple(A, b, x, l1=0.1, l2=0.1)
-    hess_reg = Joptan.linear_regression_hessian_simple(A, b, x, l1=0.1, l2=0.1)
+    loss_reg = value(lro_reg, x)
+    grad_reg = gradient(lro_reg, x)
+    hess_reg = hessian(lro_reg, x)
     
     println("\nWith regularization (l1=0.1, l2=0.1):")
     println("  Loss: $(round(loss_reg, digits=6))")
     println("  Gradient: $grad_reg")
     println("  Hessian: $hess_reg")
+    
+    # Test convenience functions (if they exist)
+    try
+        loss_simple = linear_regression_loss(A, b, x, l1=0.0, l2=0.0)
+        grad_simple = linear_regression_gradient(A, b, x, l1=0.0, l2=0.0)
+        hess_simple = linear_regression_hessian(A, b, x, l1=0.0, l2=0.0)
+        
+        println("\nUsing convenience functions:")
+        println("  Loss: $(round(loss_simple, digits=6))")
+        println("  Gradient: $grad_simple")
+        println("  Hessian: $hess_simple")
+    catch e
+        println("Convenience functions not available: $e")
+    end
 end
-
-# test_simple_functions()
 
 main()

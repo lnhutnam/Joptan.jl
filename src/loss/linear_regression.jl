@@ -1,18 +1,16 @@
 """
-Linear Regression Loss Function Implementation
+Linear Regression Oracle Implementation
 
-This module implements linear regression loss functions for optimization,
+This module implements linear regression loss functions using the Oracle base class,
 including regularized variants with L1 and L2 penalties.
 
 The loss function is defined as:
-f(x) = (1/2n) * ||Ax - b||² + λ₁||x||₁ + (λ₂/2)||x||²
+f(x) = (1/2n) * ||Ax - b||² + regularization
 
 where:
 - A is the design matrix (n × d)
 - b is the target vector (n × 1)
 - x is the parameter vector (d × 1)
-- λ₁ is the L1 regularization parameter
-- λ₂ is the L2 regularization parameter
 - n is the number of samples
 - d is the number of features
 """
@@ -22,36 +20,38 @@ using SparseArrays
 using Statistics
 using Random
 
-"""
-    LinearRegressionLoss
+include("loss_oracle.jl")
 
-Mutable struct to store linear regression problem data and regularization parameters.
+"""
+    LinearRegressionOracle
+
+Linear regression oracle that returns loss values, gradients and Hessians.
+Inherits from Oracle base class for regularization support.
 
 # Fields
 - `A::Matrix{Float64}`: Design matrix (n × d)
 - `b::Vector{Float64}`: Target vector (n × 1)
-- `l1::Float64`: L1 regularization parameter (default: 0.0)
-- `l2::Float64`: L2 regularization parameter (default: 0.0)
 - `n::Int`: Number of samples
 - `d::Int`: Number of features
 - `store_mat_vec_prod::Bool`: Whether to cache matrix-vector products
 - `x_last::Vector{Float64}`: Last x for which mat-vec product was computed
 - `mat_vec_prod::Vector{Float64}`: Cached matrix-vector product Ax
 """
-mutable struct LinearRegressionLoss
+mutable struct LinearRegressionOracle <: AbstractOracle
+    oracle::Oracle  # Base oracle for regularization
     A::Matrix{Float64}
     b::Vector{Float64}
-    l1::Float64
-    l2::Float64
     n::Int
     d::Int
     store_mat_vec_prod::Bool
     x_last::Vector{Float64}
     mat_vec_prod::Vector{Float64}
     
-    function LinearRegressionLoss(A::Matrix{Float64}, b::Vector{Float64}; 
-                                 l1::Float64=0.0, l2::Float64=0.0, 
-                                 store_mat_vec_prod::Bool=true)
+    function LinearRegressionOracle(A::Matrix{Float64}, b::Vector{Float64}; 
+                                   l1::Float64=0.0, l2::Float64=0.0, 
+                                   l2_in_prox::Bool=false,
+                                   store_mat_vec_prod::Bool=true,
+                                   seed::Int=42)
         n, d = size(A)
         
         # Validate dimensions
@@ -59,104 +59,175 @@ mutable struct LinearRegressionLoss
             throw(DimensionMismatch("Length of b ($(length(b))) must match number of rows in A ($n)"))
         end
         
+        # Handle label transformations (from Python version)
+        b_processed = copy(b)
+        unique_vals = unique(b)
+        if length(unique_vals) == 2 && Set(unique_vals) == Set([1, 2])
+            # Transform labels {1, 2} to {0, 1}
+            b_processed = b .- 1
+        elseif length(unique_vals) == 2 && Set(unique_vals) == Set([-1, 1])
+            # Transform labels {-1, 1} to {0, 1}
+            b_processed = (b .+ 1) ./ 2
+        elseif !(Set(unique_vals) ⊆ Set([0, 1]))
+            # For continuous targets, keep as is
+            b_processed = b
+        end
+        
+        # Create base oracle with regularization
+        base_oracle = Oracle(l1=l1, l2=l2, l2_in_prox=l2_in_prox, seed=seed)
+        
         # Initialize cache variables
         x_last = zeros(d)
         mat_vec_prod = zeros(n)
         
-        new(A, b, l1, l2, n, d, store_mat_vec_prod, x_last, mat_vec_prod)
+        new(base_oracle, A, b_processed, n, d, store_mat_vec_prod, x_last, mat_vec_prod)
+    end
+end
+
+# Forward Oracle methods to base oracle
+for method in [:set_seed!, :get_best_point, :reset_best!]
+    @eval $method(lro::LinearRegressionOracle, args...; kwargs...) = $method(lro.oracle, args...; kwargs...)
+end
+
+# Forward properties
+function Base.getproperty(lro::LinearRegressionOracle, prop::Symbol)
+    if prop in fieldnames(LinearRegressionOracle)
+        return getfield(lro, prop)
+    else
+        # Forward to base oracle
+        return getproperty(lro.oracle, prop)
+    end
+end
+
+function Base.setproperty!(lro::LinearRegressionOracle, prop::Symbol, value)
+    if prop in fieldnames(LinearRegressionOracle)
+        setfield!(lro, prop, value)
+    else
+        # Forward to base oracle
+        setproperty!(lro.oracle, prop, value)
     end
 end
 
 """
-    mat_vec_product(lrl::LinearRegressionLoss, x::Vector{Float64})
+    mat_vec_product(lro::LinearRegressionOracle, x::Vector{Float64})
 
 Compute matrix-vector product Ax with optional caching.
 
 # Arguments
-- `lrl::LinearRegressionLoss`: Linear regression loss object
+- `lro::LinearRegressionOracle`: Linear regression oracle
 - `x::Vector{Float64}`: Input vector
 
 # Returns
 - `Vector{Float64}`: Matrix-vector product Ax
 """
-function mat_vec_product(lrl::LinearRegressionLoss, x::Vector{Float64})::Vector{Float64}
-    if !lrl.store_mat_vec_prod || norm(x - lrl.x_last) != 0
-        z = lrl.A * x
-        if lrl.store_mat_vec_prod
-            lrl.mat_vec_prod = z
-            lrl.x_last = copy(x)
+function mat_vec_product(lro::LinearRegressionOracle, x::Vector{Float64})::Vector{Float64}
+    if !lro.store_mat_vec_prod || safe_sparse_norm(x - lro.x_last) != 0
+        z = lro.A * x
+        if lro.store_mat_vec_prod
+            lro.mat_vec_prod = z
+            lro.x_last = copy(x)
         end
         return z
     else
-        return lrl.mat_vec_prod
+        return lro.mat_vec_prod
     end
 end
 
 """
-    linear_regression_loss(lrl::LinearRegressionLoss, x::Vector{Float64})
+    _value(lro::LinearRegressionOracle, x::Vector{Float64})
 
-Compute the linear regression loss function value.
+Compute the base linear regression loss (without regularization).
 
 # Arguments
-- `lrl::LinearRegressionLoss`: Linear regression loss object
+- `lro::LinearRegressionOracle`: Linear regression oracle
 - `x::Vector{Float64}`: Parameter vector
 
 # Returns
-- `Float64`: Loss function value
+- `Float64`: Base loss function value
 
 # Formula
-f(x) = (1/2n) * ||Ax - b||² + λ₁||x||₁ + (λ₂/2)||x||²
+f(x) = (1/2n) * ||Ax - b||²
 """
-function linear_regression_loss(lrl::LinearRegressionLoss, x::Vector{Float64})::Float64
-    residual = mat_vec_product(lrl, x) - lrl.b
-    mse_loss = 0.5 * norm(residual)^2 / lrl.n
-    
-    # Add regularization
-    l1_reg = lrl.l1 * norm(x, 1)
-    l2_reg = 0.5 * lrl.l2 * norm(x)^2
-    
-    return mse_loss + l1_reg + l2_reg
+function _value(lro::LinearRegressionOracle, x::Vector{Float64})::Float64
+    residual = mat_vec_product(lro, x) - lro.b
+    return 0.5 * safe_sparse_norm(residual)^2 / lro.n
 end
 
 """
-    linear_regression_gradient(lrl::LinearRegressionLoss, x::Vector{Float64})
+    value(lro::LinearRegressionOracle, x::Vector{Float64})
 
-Compute the gradient of the linear regression loss function.
+Compute the full linear regression loss including regularization.
 
 # Arguments
-- `lrl::LinearRegressionLoss`: Linear regression loss object
+- `lro::LinearRegressionOracle`: Linear regression oracle
+- `x::Vector{Float64}`: Parameter vector
+
+# Returns
+- `Float64`: Full loss function value including regularization
+"""
+function value(lro::LinearRegressionOracle, x::Vector{Float64})::Float64
+    # Compute base value
+    base_value = _value(lro, x)
+    
+    # Add regularization
+    total_value = base_value
+    if lro.oracle.regularizer !== nothing
+        total_value += lro.oracle.regularizer(x)
+    else
+        # Add L2 regularization if not in proximal operator
+        if lro.oracle.l2 > 0
+            total_value += 0.5 * lro.oracle.l2 * safe_sparse_norm(x)^2
+        end
+    end
+    
+    # Track best solution
+    if total_value < lro.oracle.f_opt
+        lro.oracle.x_opt = copy(x)
+        lro.oracle.f_opt = total_value
+    end
+    
+    return total_value
+end
+
+"""
+    gradient(lro::LinearRegressionOracle, x::Vector{Float64})
+
+Compute the gradient of the linear regression loss.
+
+# Arguments
+- `lro::LinearRegressionOracle`: Linear regression oracle
 - `x::Vector{Float64}`: Parameter vector
 
 # Returns
 - `Vector{Float64}`: Gradient vector
 
 # Formula
-∇f(x) = (1/n) * A^T(Ax - b) + λ₁ * sign(x) + λ₂ * x
-
-Note: For L1 regularization, we use the subgradient (sign function).
+∇f(x) = (1/n) * A^T(Ax - b) + regularization_gradient
 """
-function linear_regression_gradient(lrl::LinearRegressionLoss, x::Vector{Float64})::Vector{Float64}
-    residual = mat_vec_product(lrl, x) - lrl.b
-    grad = lrl.A' * residual / lrl.n
+function gradient(lro::LinearRegressionOracle, x::Vector{Float64})::Vector{Float64}
+    residual = mat_vec_product(lro, x) - lro.b
+    grad = lro.A' * residual / lro.n
     
-    # Add L2 regularization
-    grad += lrl.l2 * x
+    # Add L2 regularization gradient (if not in proximal)
+    if lro.oracle.l2 > 0
+        grad = safe_sparse_add(grad, lro.oracle.l2 * x)
+    end
     
     # Add L1 regularization (subgradient)
-    if lrl.l1 > 0
-        grad += lrl.l1 * sign.(x)
+    if lro.oracle.l1 > 0
+        grad = safe_sparse_add(grad, lro.oracle.l1 * sign.(x))
     end
     
     return grad
 end
 
 """
-    linear_regression_hessian(lrl::LinearRegressionLoss, x::Vector{Float64})
+    hessian(lro::LinearRegressionOracle, x::Vector{Float64})
 
-Compute the Hessian of the linear regression loss function.
+Compute the Hessian of the linear regression loss.
 
 # Arguments
-- `lrl::LinearRegressionLoss`: Linear regression loss object
+- `lro::LinearRegressionOracle`: Linear regression oracle
 - `x::Vector{Float64}`: Parameter vector (not used for linear regression, but kept for consistency)
 
 # Returns
@@ -167,26 +238,26 @@ Compute the Hessian of the linear regression loss function.
 
 Note: L1 regularization contributes zero to the Hessian (except at x=0 where it's undefined).
 """
-function linear_regression_hessian(lrl::LinearRegressionLoss, x::Vector{Float64})::Matrix{Float64}
-    hessian = lrl.A' * lrl.A / lrl.n
+function hessian(lro::LinearRegressionOracle, x::Vector{Float64})::Matrix{Float64}
+    hessian = lro.A' * lro.A / lro.n
     
     # Add L2 regularization
-    if lrl.l2 > 0
-        hessian += lrl.l2 * I(lrl.d)
+    if lro.oracle.l2 > 0
+        hessian += lro.oracle.l2 * I(lro.d)
     end
     
     return hessian
 end
 
 """
-    linear_regression_stochastic_gradient(lrl::LinearRegressionLoss, x::Vector{Float64}, 
-                                         idx::Union{Vector{Int}, Nothing}=nothing;
-                                         batch_size::Int=1, replace::Bool=false)
+    stochastic_gradient(lro::LinearRegressionOracle, x::Vector{Float64}, 
+                       idx::Union{Vector{Int}, Nothing}=nothing;
+                       batch_size::Int=1, replace::Bool=false)
 
 Compute stochastic gradient using a batch of samples.
 
 # Arguments
-- `lrl::LinearRegressionLoss`: Linear regression loss object
+- `lro::LinearRegressionOracle`: Linear regression oracle
 - `x::Vector{Float64}`: Parameter vector
 - `idx::Union{Vector{Int}, Nothing}`: Indices of samples to use (if nothing, randomly sample)
 - `batch_size::Int`: Size of the batch (default: 1)
@@ -196,89 +267,107 @@ Compute stochastic gradient using a batch of samples.
 - `Vector{Float64}`: Stochastic gradient vector
 
 # Formula
-∇f_batch(x) = (1/|batch|) * A_batch^T(A_batch*x - b_batch) + λ₁ * sign(x) + λ₂ * x
+∇f_batch(x) = (1/|batch|) * A_batch^T(A_batch*x - b_batch) + regularization_gradient
 """
-function linear_regression_stochastic_gradient(lrl::LinearRegressionLoss, x::Vector{Float64}, 
-                                             idx::Union{Vector{Int}, Nothing}=nothing;
-                                             batch_size::Int=1, replace::Bool=false)::Vector{Float64}
+function stochastic_gradient(lro::LinearRegressionOracle, x::Vector{Float64}, 
+                            idx::Union{Vector{Int}, Nothing}=nothing;
+                            batch_size::Int=1, replace::Bool=false)::Vector{Float64}
     # Sample indices if not provided
     if idx === nothing
-        idx = sample(1:lrl.n, batch_size; replace=replace)
+        if replace
+            idx = rand(lro.oracle.rng, 1:lro.n, batch_size)
+        else
+            if batch_size > lro.n
+                throw(ArgumentError("Cannot sample $batch_size elements without replacement from $lro.n samples"))
+            end
+            idx = shuffle(lro.oracle.rng, collect(1:lro.n))[1:batch_size]
+        end
     end
     
     # Compute stochastic gradient
-    A_batch = lrl.A[idx, :]
-    b_batch = lrl.b[idx]
+    A_batch = lro.A[idx, :]
+    b_batch = lro.b[idx]
     residual = A_batch * x - b_batch
     stoch_grad = A_batch' * residual / length(idx)
     
     # Add L2 regularization
-    stoch_grad += lrl.l2 * x
+    if lro.oracle.l2 > 0
+        stoch_grad = safe_sparse_add(stoch_grad, lro.oracle.l2 * x)
+    end
     
     # Add L1 regularization (subgradient)
-    if lrl.l1 > 0
-        stoch_grad += lrl.l1 * sign.(x)
+    if lro.oracle.l1 > 0
+        stoch_grad = safe_sparse_add(stoch_grad, lro.oracle.l1 * sign.(x))
     end
     
     return stoch_grad
 end
 
 """
-    linear_regression_smoothness(lrl::LinearRegressionLoss)
+    smoothness(lro::LinearRegressionOracle)
 
 Compute the smoothness constant (largest eigenvalue of the Hessian).
 
 # Arguments
-- `lrl::LinearRegressionLoss`: Linear regression loss object
+- `lro::LinearRegressionOracle`: Linear regression oracle
 
 # Returns
 - `Float64`: Smoothness constant
 
 The smoothness constant is λ_max(A^T*A/n) + λ₂
 """
-function linear_regression_smoothness(lrl::LinearRegressionLoss)::Float64
-    covariance = lrl.A' * lrl.A / lrl.n
-    max_eigenvalue = maximum(eigvals(covariance))
-    return max_eigenvalue + lrl.l2
+function smoothness(lro::LinearRegressionOracle)::Float64
+    if lro.oracle._smoothness === nothing
+        covariance = lro.A' * lro.A / lro.n
+        max_eigenvalue = maximum(eigvals(covariance))
+        lro.oracle._smoothness = max_eigenvalue + lro.oracle.l2
+    end
+    return lro.oracle._smoothness
 end
 
 """
-    linear_regression_max_smoothness(lrl::LinearRegressionLoss)
+    max_smoothness(lro::LinearRegressionOracle)
 
 Compute the maximum smoothness constant over all samples.
 
 # Arguments
-- `lrl::LinearRegressionLoss`: Linear regression loss object
+- `lro::LinearRegressionOracle`: Linear regression oracle
 
 # Returns
 - `Float64`: Maximum smoothness constant
 
 This is the maximum row norm squared of A plus λ₂.
 """
-function linear_regression_max_smoothness(lrl::LinearRegressionLoss)::Float64
-    max_row_norm_squared = maximum(sum(abs2, lrl.A; dims=2))
-    return max_row_norm_squared + lrl.l2
+function max_smoothness(lro::LinearRegressionOracle)::Float64
+    if lro.oracle._max_smoothness === nothing
+        max_row_norm_squared = maximum(sum(abs2, lro.A; dims=2))
+        lro.oracle._max_smoothness = max_row_norm_squared + lro.oracle.l2
+    end
+    return lro.oracle._max_smoothness
 end
 
 """
-    linear_regression_average_smoothness(lrl::LinearRegressionLoss)
+    average_smoothness(lro::LinearRegressionOracle)
 
 Compute the average smoothness constant over all samples.
 
 # Arguments
-- `lrl::LinearRegressionLoss`: Linear regression loss object
+- `lro::LinearRegressionOracle`: Linear regression oracle
 
 # Returns
 - `Float64`: Average smoothness constant
 
 This is the average row norm squared of A plus λ₂.
 """
-function linear_regression_average_smoothness(lrl::LinearRegressionLoss)::Float64
-    avg_row_norm_squared = mean(sum(abs2, lrl.A; dims=2))
-    return avg_row_norm_squared + lrl.l2
+function average_smoothness(lro::LinearRegressionOracle)::Float64
+    if lro.oracle._ave_smoothness === nothing
+        avg_row_norm_squared = mean(sum(abs2, lro.A; dims=2))
+        lro.oracle._ave_smoothness = avg_row_norm_squared + lro.oracle.l2
+    end
+    return lro.oracle._ave_smoothness
 end
 
-# Convenience functions that work with matrices directly (similar to Rosenbrock/Rastrigin)
+# Convenience functions that work with matrices directly (for backward compatibility)
 
 """
     linear_regression_simple(A::Matrix{Float64}, b::Vector{Float64}, x::Vector{Float64}; 
@@ -298,12 +387,8 @@ Simple linear regression loss function that works directly with matrices.
 """
 function linear_regression_simple(A::Matrix{Float64}, b::Vector{Float64}, x::Vector{Float64}; 
                                 l1::Float64=0.0, l2::Float64=0.0)::Float64
-    n = size(A, 1)
-    residual = A * x - b
-    mse_loss = 0.5 * norm(residual)^2 / n
-    l1_reg = l1 * norm(x, 1)
-    l2_reg = 0.5 * l2 * norm(x)^2
-    return mse_loss + l1_reg + l2_reg
+    oracle = LinearRegressionOracle(A, b, l1=l1, l2=l2)
+    return value(oracle, x)
 end
 
 """
@@ -324,15 +409,8 @@ Simple linear regression gradient function that works directly with matrices.
 """
 function linear_regression_gradient_simple(A::Matrix{Float64}, b::Vector{Float64}, x::Vector{Float64}; 
                                          l1::Float64=0.0, l2::Float64=0.0)::Vector{Float64}
-    n = size(A, 1)
-    residual = A * x - b
-    grad = A' * residual / n + l2 * x
-    
-    if l1 > 0
-        grad += l1 * sign.(x)
-    end
-    
-    return grad
+    oracle = LinearRegressionOracle(A, b, l1=l1, l2=l2)
+    return gradient(oracle, x)
 end
 
 """
@@ -353,24 +431,19 @@ Simple linear regression Hessian function that works directly with matrices.
 """
 function linear_regression_hessian_simple(A::Matrix{Float64}, b::Vector{Float64}, x::Vector{Float64}; 
                                         l1::Float64=0.0, l2::Float64=0.0)::Matrix{Float64}
-    n, d = size(A)
-    hessian = A' * A / n
-    
-    if l2 > 0
-        hessian += l2 * I(d)
-    end
-    
-    return hessian
+    oracle = LinearRegressionOracle(A, b, l1=l1, l2=l2)
+    return hessian(oracle, x)
 end
 
-# Helper function for sampling (simple implementation)
-function sample(range::UnitRange{Int}, n::Int; replace::Bool=false)
-    if replace
-        return rand(range, n)
-    else
-        if n > length(range)
-            throw(ArgumentError("Cannot sample $n elements without replacement from range of length $(length(range))"))
-        end
-        return shuffle(collect(range))[1:n]
-    end
-end
+# For backward compatibility, keep the old struct name as an alias
+const LinearRegressionLoss = LinearRegressionOracle
+
+# Legacy function names
+const linear_regression_loss = linear_regression_simple
+const linear_regression_gradient = linear_regression_gradient_simple
+const linear_regression_hessian = linear_regression_hessian_simple
+
+# Export the main oracle type and functions
+export LinearRegressionOracle, LinearRegressionLoss
+export mat_vec_product, stochastic_gradient
+export smoothness, max_smoothness, average_smoothness
