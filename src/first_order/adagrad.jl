@@ -13,7 +13,6 @@ using LinearAlgebra
 using Statistics
 using Random
 
-# No need to include base_optimizer.jl here since it's included in main module
 
 """
     AdagradOptimizer
@@ -391,29 +390,11 @@ function optimize_adagrad(loss_func::Function, grad_func::Function, x0::Vector{F
                          primal_dual::Bool=false, lr::Float64=1.0, delta::Float64=0.0,
                          max_iter::Int=1000, tol::Float64=1e-6, verbose::Bool=false)
     
-    # Create optimizer
-    optimizer = AdagradOptimizer(loss_func, grad_func,
-                               primal_dual=primal_dual, lr=lr, delta=delta,
-                               tolerance=tol, label="Adagrad")
-    
-    # Run optimization
-    trace = run!(optimizer, x0, it_max=max_iter, verbose=verbose)
-    
-    # Extract results
-    x_opt = optimizer.x
-    
-    # Convert trace to history format
-    history = []
-    for i in 1:length(trace.xs)
-        push!(history, Dict(
-            "iteration" => trace.its[i],
-            "loss" => trace.losses_computed ? trace.losses[i] : loss_func(trace.xs[i]),
-            "gradient_norm" => trace.grad_norms_computed ? trace.grad_norms[i] : norm(grad_func(trace.xs[i])),
-            "parameters" => trace.xs[i]
-        ))
-    end
-    
-    return x_opt, history
+    return optimize_with_legacy_interface(
+        AdagradOptimizer, loss_func, grad_func, x0,
+        max_iter=max_iter, tol=tol, verbose=verbose,
+        primal_dual=primal_dual, lr=lr, delta=delta
+    )
 end
 
 """
@@ -425,103 +406,13 @@ function compare_adagrad_variants(loss_func::Function, grad_func::Function, x0::
                                  lr_values=[0.1, 1.0, 10.0], delta_values=[0.0, 1e-8, 1e-6],
                                  max_iter::Int=1000, tol::Float64=1e-6)
     
-    results = Dict[]
-    
-    println("Comparing Adagrad variants...")
-    println("=" ^ 50)
-    
-    for primal_dual in [false, true]
-        for lr in lr_values
-            for delta in delta_values
-                method_name = primal_dual ? "Dual Averaging" : "Gradient Descent"
-                
-                println("Testing $method_name with lr=$lr, delta=$delta")
-                
-                # Create and run optimizer
-                optimizer = AdagradOptimizer(loss_func, grad_func,
-                                           primal_dual=primal_dual, lr=lr, delta=delta,
-                                           tolerance=tol, label=method_name)
-                
-                trace = run!(optimizer, x0, it_max=max_iter, verbose=false)
-                
-                # Extract results
-                x_opt = optimizer.x
-                final_loss = loss_func(x_opt)
-                final_grad_norm = norm(grad_func(x_opt))
-                converged = final_grad_norm < tol
-                iterations = optimizer.it
-                
-                result = Dict(
-                    "method" => method_name,
-                    "primal_dual" => primal_dual,
-                    "lr" => lr,
-                    "delta" => delta,
-                    "final_loss" => final_loss,
-                    "final_grad_norm" => final_grad_norm,
-                    "converged" => converged,
-                    "iterations" => iterations,
-                    "x_opt" => x_opt,
-                    "trace" => trace
-                )
-                
-                push!(results, result)
-                
-                println("  Final loss: $(round(final_loss, digits=6))")
-                println("  Gradient norm: $(round(final_grad_norm, digits=6))")
-                println("  Converged: $converged")
-                println("  Iterations: $iterations")
-                println()
-            end
-        end
-    end
-    
-    return results
-end
-
-"""
-    get_best_result(results::Vector{Dict})
-
-Find the best result from a comparison of Adagrad variants.
-"""
-function get_best_result(results::Vector{Dict})
-    best_result = results[1]
-    
-    for result in results
-        if result["final_loss"] < best_result["final_loss"]
-            best_result = result
-        end
-    end
-    
-    return best_result
-end
-
-"""
-    print_results_summary(results::Vector{Dict})
-
-Print a summary table of Adagrad comparison results.
-"""
-function print_results_summary(results::Vector{Dict})
-    println("Adagrad Results Summary")
-    println("=" ^ 80)
-    println("Method\t\t\tLR\tDelta\t\tFinal Loss\tGrad Norm\tConverged\tIters")
-    println("-" ^ 80)
-    
-    for result in results
-        method = result["primal_dual"] ? "Dual Avg" : "Grad Desc"
-        lr = result["lr"]
-        delta = result["delta"]
-        loss = round(result["final_loss"], digits=6)
-        grad_norm = round(result["final_grad_norm"], digits=6)
-        converged = result["converged"] ? "Yes" : "No"
-        iters = result["iterations"]
-        
-        println("$method\t\t$lr\t$delta\t\t$loss\t$grad_norm\t$converged\t\t$iters")
-    end
-    
-    println("-" ^ 80)
-    
-    # Find and highlight best result
-    best_result = get_best_result(results)
-    println("Best result: $(best_result["method"]) with lr=$(best_result["lr"]), delta=$(best_result["delta"])")
-    println("Final loss: $(round(best_result["final_loss"], digits=6))")
+    return compare_optimizer_variants(
+        AdagradOptimizer, loss_func, grad_func, x0,
+        parameter_grid=Dict(
+            :lr => lr_values,
+            :delta => delta_values,
+            :primal_dual => [false, true]
+        ),
+        max_iter=max_iter, tol=tol
+    )
 end

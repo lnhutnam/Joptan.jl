@@ -27,8 +27,8 @@ function generate_regression_data(n::Int, d::Int; noise_std::Float64=0.1, condit
     - condition_number: Condition number of the design matrix
     
     Returns:
-    - A: Design matrix (n × d)
-    - b: Target vector (n × 1)
+    - A: Design matrix ($n \times d$)
+    - b: Target vector ($n \times 1$)
     - x_true: True parameters used to generate data
     """
     println("Generating synthetic regression data...")
