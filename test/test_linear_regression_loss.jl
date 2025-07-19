@@ -6,9 +6,6 @@ using Test
 using LinearAlgebra
 using Random
 using Statistics
-
-# # Add the src directory to the path for testing
-# push!(LOAD_PATH, "../src")
 using Joptan
 
 # Set seed for reproducible tests
@@ -16,29 +13,29 @@ Random.seed!(42)
 
 @testset "Linear Regression Loss Tests" begin
     
-    @testset "Basic LinearRegressionLoss Construction" begin
+    @testset "Basic LinearRegressionOracle Construction" begin
         # Test basic construction
         A = [1.0 2.0; 3.0 4.0; 5.0 6.0]
         b = [1.0, 2.0, 3.0]
         
-        lrl = LinearRegressionLoss(A, b)
+        lro = LinearRegressionOracle(A, b)
         
-        @test lrl.A == A
-        @test lrl.b == b
-        @test lrl.l1 == 0.0
-        @test lrl.l2 == 0.0
-        @test lrl.n == 3
-        @test lrl.d == 2
-        @test lrl.store_mat_vec_prod == true
+        @test lro.A == A
+        @test lro.b == b
+        @test lro.l1 == 0.0
+        @test lro.l2 == 0.0
+        @test lro.n == 3
+        @test lro.d == 2
+        @test lro.store_mat_vec_prod == true
         
         # Test with regularization
-        lrl_reg = LinearRegressionLoss(A, b, l1=0.1, l2=0.5)
-        @test lrl_reg.l1 == 0.1
-        @test lrl_reg.l2 == 0.5
+        lro_reg = LinearRegressionOracle(A, b, l1=0.1, l2=0.5)
+        @test lro_reg.l1 == 0.1
+        @test lro_reg.l2 == 0.5
         
         # Test dimension mismatch
         b_wrong = [1.0, 2.0]
-        @test_throws DimensionMismatch LinearRegressionLoss(A, b_wrong)
+        @test_throws DimensionMismatch LinearRegressionOracle(A, b_wrong)
     end
     
     @testset "Matrix-Vector Product" begin
@@ -46,21 +43,21 @@ Random.seed!(42)
         b = [1.0, 2.0, 3.0]
         x = [0.5, -0.5]
         
-        lrl = LinearRegressionLoss(A, b)
+        lro = LinearRegressionOracle(A, b)
         
         # Test matrix-vector product
-        result = mat_vec_product(lrl, x)
+        result = mat_vec_product(lro, x)
         expected = A * x
         @test result ≈ expected
         
         # Test caching
-        result2 = mat_vec_product(lrl, x)
+        result2 = mat_vec_product(lro, x)
         @test result2 ≈ expected
         @test result2 == result
         
         # Test cache invalidation
         x_new = [1.0, 1.0]
-        result3 = mat_vec_product(lrl, x_new)
+        result3 = mat_vec_product(lro, x_new)
         expected3 = A * x_new
         @test result3 ≈ expected3
     end
@@ -71,8 +68,8 @@ Random.seed!(42)
         x = [0.5, -0.5]
         
         # Test basic loss
-        lrl = LinearRegressionLoss(A, b)
-        loss_val = linear_regression_loss(lrl, x)
+        lro = LinearRegressionOracle(A, b)
+        loss_val = value(lro, x)
         
         # Manual calculation
         residual = A * x - b
@@ -80,14 +77,14 @@ Random.seed!(42)
         @test loss_val ≈ expected_loss
         
         # Test with L2 regularization
-        lrl_l2 = LinearRegressionLoss(A, b, l2=0.1)
-        loss_l2 = linear_regression_loss(lrl_l2, x)
+        lro_l2 = LinearRegressionOracle(A, b, l2=0.1)
+        loss_l2 = value(lro_l2, x)
         expected_l2 = expected_loss + 0.5 * 0.1 * norm(x)^2
         @test loss_l2 ≈ expected_l2
         
         # Test with L1 regularization
-        lrl_l1 = LinearRegressionLoss(A, b, l1=0.1)
-        loss_l1 = linear_regression_loss(lrl_l1, x)
+        lro_l1 = LinearRegressionOracle(A, b, l1=0.1)
+        loss_l1 = value(lro_l1, x)
         expected_l1 = expected_loss + 0.1 * norm(x, 1)
         @test loss_l1 ≈ expected_l1
     end
@@ -98,8 +95,8 @@ Random.seed!(42)
         x = [0.5, -0.5]
         
         # Test basic gradient
-        lrl = LinearRegressionLoss(A, b)
-        grad = linear_regression_gradient(lrl, x)
+        lro = LinearRegressionOracle(A, b)
+        grad = gradient(lro, x)
         
         # Manual calculation
         residual = A * x - b
@@ -107,14 +104,14 @@ Random.seed!(42)
         @test grad ≈ expected_grad
         
         # Test with L2 regularization
-        lrl_l2 = LinearRegressionLoss(A, b, l2=0.1)
-        grad_l2 = linear_regression_gradient(lrl_l2, x)
+        lro_l2 = LinearRegressionOracle(A, b, l2=0.1)
+        grad_l2 = gradient(lro_l2, x)
         expected_grad_l2 = expected_grad + 0.1 * x
         @test grad_l2 ≈ expected_grad_l2
         
         # Test with L1 regularization
-        lrl_l1 = LinearRegressionLoss(A, b, l1=0.1)
-        grad_l1 = linear_regression_gradient(lrl_l1, x)
+        lro_l1 = LinearRegressionOracle(A, b, l1=0.1)
+        grad_l1 = gradient(lro_l1, x)
         expected_grad_l1 = expected_grad + 0.1 * sign.(x)
         @test grad_l1 ≈ expected_grad_l1
     end
@@ -125,16 +122,16 @@ Random.seed!(42)
         x = [0.5, -0.5]
         
         # Test basic Hessian
-        lrl = LinearRegressionLoss(A, b)
-        hess = linear_regression_hessian(lrl, x)
+        lro = LinearRegressionOracle(A, b)
+        hess = hessian(lro, x)
         
         # Manual calculation
         expected_hess = A' * A / 3
         @test hess ≈ expected_hess
         
         # Test with L2 regularization
-        lrl_l2 = LinearRegressionLoss(A, b, l2=0.1)
-        hess_l2 = linear_regression_hessian(lrl_l2, x)
+        lro_l2 = LinearRegressionOracle(A, b, l2=0.1)
+        hess_l2 = hessian(lro_l2, x)
         expected_hess_l2 = expected_hess + 0.1 * I(2)
         @test hess_l2 ≈ expected_hess_l2
         
@@ -148,11 +145,11 @@ Random.seed!(42)
         b = rand(100)
         x = rand(5)
         
-        lrl = LinearRegressionLoss(A, b, l2=0.1)
+        lro = LinearRegressionOracle(A, b, l2=0.1)
         
         # Test stochastic gradient with specified indices
         idx = [1, 3, 5]
-        stoch_grad = linear_regression_stochastic_gradient(lrl, x, idx)
+        stoch_grad = stochastic_gradient(lro, x, idx)
         
         # Manual calculation
         residual = A[idx, :] * x - b[idx]
@@ -160,12 +157,12 @@ Random.seed!(42)
         @test stoch_grad ≈ expected_grad
         
         # Test with random sampling
-        stoch_grad_rand = linear_regression_stochastic_gradient(lrl, x, batch_size=10)
+        stoch_grad_rand = stochastic_gradient(lro, x, nothing, batch_size=10)
         @test length(stoch_grad_rand) == 5
         
         # Test that full batch equals regular gradient
-        full_batch_grad = linear_regression_stochastic_gradient(lrl, x, collect(1:100))
-        regular_grad = linear_regression_gradient(lrl, x)
+        full_batch_grad = stochastic_gradient(lro, x, collect(1:100))
+        regular_grad = gradient(lro, x)
         @test full_batch_grad ≈ regular_grad
     end
     
@@ -173,26 +170,26 @@ Random.seed!(42)
         A = [1.0 2.0; 3.0 4.0; 5.0 6.0]
         b = [1.0, 2.0, 3.0]
         
-        lrl = LinearRegressionLoss(A, b, l2=0.1)
+        lro = LinearRegressionOracle(A, b, l2=0.1)
         
         # Test smoothness computation
-        smoothness = linear_regression_smoothness(lrl)
+        smooth = smoothness(lro)
         covariance = A' * A / 3
         expected_smoothness = maximum(eigvals(covariance)) + 0.1
-        @test smoothness ≈ expected_smoothness
+        @test smooth ≈ expected_smoothness
         
         # Test max smoothness
-        max_smoothness = linear_regression_max_smoothness(lrl)
+        max_smooth = max_smoothness(lro)
         expected_max = maximum(sum(abs2, A, dims=2)) + 0.1
-        @test max_smoothness ≈ expected_max
+        @test max_smooth ≈ expected_max
         
         # Test average smoothness
-        avg_smoothness = linear_regression_average_smoothness(lrl)
+        avg_smooth = average_smoothness(lro)
         expected_avg = mean(sum(abs2, A, dims=2)) + 0.1
-        @test avg_smoothness ≈ expected_avg
+        @test avg_smooth ≈ expected_avg
         
         # Test ordering
-        @test avg_smoothness <= smoothness <= max_smoothness
+        @test smooth <= avg_smooth <= max_smooth
     end
     
     @testset "Simple Functions" begin
@@ -201,26 +198,82 @@ Random.seed!(42)
         x = [0.5, -0.5]
         
         # Test simple loss function
-        loss_simple = linear_regression_simple(A, b, x)
-        lrl = LinearRegressionLoss(A, b)
-        loss_object = linear_regression_loss(lrl, x)
+        loss_simple = linear_regression_loss(A, b, x)
+        lro = LinearRegressionOracle(A, b)
+        loss_object = value(lro, x)
         @test loss_simple ≈ loss_object
         
         # Test simple gradient function
-        grad_simple = linear_regression_gradient_simple(A, b, x)
-        grad_object = linear_regression_gradient(lrl, x)
+        grad_simple = linear_regression_gradient(A, b, x)
+        grad_object = gradient(lro, x)
         @test grad_simple ≈ grad_object
         
         # Test simple Hessian function
-        hess_simple = linear_regression_hessian_simple(A, b, x)
-        hess_object = linear_regression_hessian(lrl, x)
+        hess_simple = linear_regression_hessian(A, b, x)
+        hess_object = hessian(lro, x)
         @test hess_simple ≈ hess_object
         
         # Test with regularization
-        loss_reg = linear_regression_simple(A, b, x, l1=0.1, l2=0.2)
-        lrl_reg = LinearRegressionLoss(A, b, l1=0.1, l2=0.2)
-        loss_reg_obj = linear_regression_loss(lrl_reg, x)
+        loss_reg = linear_regression_loss(A, b, x, l1=0.1, l2=0.2)
+        lro_reg = LinearRegressionOracle(A, b, l1=0.1, l2=0.2)
+        loss_reg_obj = value(lro_reg, x)
         @test loss_reg ≈ loss_reg_obj
+    end
+    
+    @testset "Oracle Interface Methods" begin
+        A = rand(10, 5)
+        b = rand(10)
+        x = rand(5)
+        
+        lro = LinearRegressionOracle(A, b, l1=0.1, l2=0.2)
+        
+        # Test best point tracking through the oracle's internal state
+        # Initially, no best point should be set
+        @test lro.x_opt === nothing
+        @test lro.f_opt == Inf
+        
+        # Evaluate at a point to set best
+        loss_val = value(lro, x)
+        @test lro.x_opt ≈ x
+        @test lro.f_opt ≈ loss_val
+        
+        # Evaluate at a worse point - best should not change
+        x_worse = x .+ 10.0  # Much worse point
+        loss_worse = value(lro, x_worse)
+        @test lro.x_opt ≈ x  # Should still be the original point
+        @test lro.f_opt ≈ loss_val  # Should still be the original loss
+        @test loss_worse > loss_val  # Verify it's actually worse
+        
+        # Evaluate at a better point - best should update
+        x_better = zeros(5)  # Should be better for regularized problem
+        loss_better = value(lro, x_better)
+        if loss_better < loss_val
+            @test lro.x_opt ≈ x_better
+            @test lro.f_opt ≈ loss_better
+        end
+    end
+    
+    @testset "Label Processing" begin
+        # Test binary label transformation {1, 2} -> {0, 1}
+        A = rand(10, 3)
+        b_12 = Float64[1, 2, 1, 2, 1, 2, 1, 2, 1, 2]  # Convert to Float64
+        lro = LinearRegressionOracle(A, b_12)
+        @test all(lro.b .∈ Ref([0.0, 1.0]))
+        
+        # Test binary label transformation {-1, 1} -> {0, 1}
+        b_neg1_1 = Float64[-1, 1, -1, 1, -1, 1, -1, 1, -1, 1]  # Convert to Float64
+        lro2 = LinearRegressionOracle(A, b_neg1_1)
+        @test all(lro2.b .∈ Ref([0.0, 1.0]))
+        
+        # Test that {0, 1} labels are preserved
+        b_01 = Float64[0, 1, 0, 1, 0, 1, 0, 1, 0, 1]  # Convert to Float64
+        lro3 = LinearRegressionOracle(A, b_01)
+        @test lro3.b == b_01
+        
+        # Test continuous labels are preserved
+        b_continuous = rand(10)
+        lro4 = LinearRegressionOracle(A, b_continuous)
+        @test lro4.b == b_continuous
     end
     
     @testset "Analytical Solutions" begin
@@ -229,16 +282,33 @@ Random.seed!(42)
         b = rand(20)
         
         # OLS solution
-        lrl = LinearRegressionLoss(A, b)
+        lro = LinearRegressionOracle(A, b)
         x_ols = (A' * A) \ (A' * b)
-        grad_at_ols = linear_regression_gradient(lrl, x_ols)
+        grad_at_ols = gradient(lro, x_ols)
         @test norm(grad_at_ols) < 1e-10
         
-        # Ridge solution
-        lrl_ridge = LinearRegressionLoss(A, b, l2=0.1)
-        x_ridge = (A' * A + 0.1 * I(5)) \ (A' * b)
-        grad_at_ridge = linear_regression_gradient(lrl_ridge, x_ridge)
+        # Loss: f(x) = (1/2n) * ||Ax - b||² + (λ/2) * ||x||²
+        # Ridge solution - the gradient formula in LinearRegressionOracle is:
+        # grad = A' * (A*x - b) / n + λ * x
+        # Setting to zero: A' * (A*x - b) / n + λ * x = 0
+        # A' * A * x / n - A' * b / n + λ * x = 0
+        # (A' * A / n + λ * I) * x = A' * b / n
+        # So the solution is: x = (A' * A / n + λ * I)^(-1) * (A' * b / n)
+        λ = 0.1
+        lro_ridge = LinearRegressionOracle(A, b, l2=λ)
+        x_ridge = (A' * A / lro_ridge.n + λ * I(5)) \ (A' * b / lro_ridge.n)
+        grad_at_ridge = gradient(lro_ridge, x_ridge)
         @test norm(grad_at_ridge) < 1e-10
+        
+        # Alternative test: verify the analytical solution satisfies the normal equations
+        # Check that the residual is orthogonal to the columns of A (for OLS)
+        residual_ols = A * x_ols - b
+        @test norm(A' * residual_ols) < 1e-10
+        
+        # For Ridge, check the modified normal equations
+        residual_ridge = A * x_ridge - b
+        normal_eq_ridge = A' * residual_ridge / lro_ridge.n + λ * x_ridge
+        @test norm(normal_eq_ridge) < 1e-10
     end
     
     @testset "Finite Difference Gradient Check" begin
@@ -246,10 +316,11 @@ Random.seed!(42)
         b = rand(10)
         x = rand(3)
         
-        lrl = LinearRegressionLoss(A, b, l1=0.1, l2=0.1)
+        # Test only with L2 regularization (L1 is non-differentiable)
+        lro_smooth = LinearRegressionOracle(A, b, l2=0.1)
         
         # Analytical gradient
-        grad_analytical = linear_regression_gradient(lrl, x)
+        grad_analytical = gradient(lro_smooth, x)
         
         # Finite difference gradient
         h = 1e-8
@@ -261,59 +332,61 @@ Random.seed!(42)
             x_plus[i] += h
             x_minus[i] -= h
             
-            grad_fd[i] = (linear_regression_loss(lrl, x_plus) - linear_regression_loss(lrl, x_minus)) / (2 * h)
+            grad_fd[i] = (value(lro_smooth, x_plus) - value(lro_smooth, x_minus)) / (2 * h)
         end
         
-        # Note: L1 regularization makes this test approximate due to non-differentiability
-        # We test only the differentiable part
-        lrl_smooth = LinearRegressionLoss(A, b, l2=0.1)
-        grad_smooth = linear_regression_gradient(lrl_smooth, x)
-        
-        grad_fd_smooth = zeros(3)
-        for i in 1:3
-            x_plus = copy(x)
-            x_minus = copy(x)
-            x_plus[i] += h
-            x_minus[i] -= h
-            
-            grad_fd_smooth[i] = (linear_regression_loss(lrl_smooth, x_plus) - linear_regression_loss(lrl_smooth, x_minus)) / (2 * h)
-        end
-        
-        @test norm(grad_smooth - grad_fd_smooth) < 1e-6
+        @test norm(grad_analytical - grad_fd) < 1e-6
     end
     
     @testset "Finite Difference Hessian Check" begin
-        A = rand(10, 3)
-        b = rand(10)
+        A = rand(5, 3)  # Smaller problem for better numerical stability
+        b = rand(5)
         x = rand(3)
         
-        lrl = LinearRegressionLoss(A, b, l2=0.1)
+        lro = LinearRegressionOracle(A, b, l2=0.1)
         
         # Analytical Hessian
-        hess_analytical = linear_regression_hessian(lrl, x)
+        hess_analytical = hessian(lro, x)
         
-        # Finite difference Hessian
-        h = 1e-8
-        hess_fd = zeros(3, 3)
+        # For linear regression, Hessian is constant and doesn't depend on x
+        # Let's just verify this property instead of finite differences
+        x2 = rand(3)
+        hess_analytical2 = hessian(lro, x2)
+        @test norm(hess_analytical - hess_analytical2) < 1e-12
         
-        for i in 1:3
-            for j in 1:3
-                x_pp = copy(x)
-                x_pm = copy(x)
-                x_mp = copy(x)
-                x_mm = copy(x)
-                
-                x_pp[i] += h; x_pp[j] += h
-                x_pm[i] += h; x_pm[j] -= h
-                x_mp[i] -= h; x_mp[j] += h
-                x_mm[i] -= h; x_mm[j] -= h
-                
-                hess_fd[i, j] = (linear_regression_loss(lrl, x_pp) - linear_regression_loss(lrl, x_pm) -
-                                linear_regression_loss(lrl, x_mp) + linear_regression_loss(lrl, x_mm)) / (4 * h^2)
-            end
-        end
+        # Verify Hessian structure: A'A/n + λI
+        expected_hess = A' * A / 5 + 0.1 * I(3)
+        @test norm(hess_analytical - expected_hess) < 1e-12
         
-        @test norm(hess_analytical - hess_fd) < 1e-6
+        # Test that Hessian is symmetric and positive definite
+        @test norm(hess_analytical - hess_analytical') < 1e-12
+        @test all(eigvals(hess_analytical) .> 0)
+    end
+    
+    @testset "Integration with Optimizers" begin
+        # Test that LinearRegressionOracle works with Adagrad
+        A = rand(20, 5)
+        b = rand(20)
+        x0 = randn(5) * 0.1
+        
+        lro = LinearRegressionOracle(A, b, l2=0.1)
+        
+        # Define loss and gradient functions for optimizer
+        loss_func(x) = value(lro, x)
+        grad_func(x) = gradient(lro, x)
+        
+        # Create and run optimizer
+        optimizer = AdagradOptimizer(loss_func, grad_func, lr=0.1, delta=1e-8)
+        trace = run!(optimizer, x0, it_max=100, verbose=false)
+        
+        # Check that optimization ran
+        @test length(trace.xs) > 1
+        @test optimizer.it > 0
+        
+        # Check that loss decreased
+        initial_loss = loss_func(x0)
+        final_loss = loss_func(optimizer.x)
+        @test final_loss <= initial_loss
     end
     
     @testset "Edge Cases" begin
@@ -322,21 +395,45 @@ Random.seed!(42)
         b = [1.0]
         x = [0.5, -0.5]
         
-        lrl = LinearRegressionLoss(A, b)
-        @test !isnan(linear_regression_loss(lrl, x))
-        @test !any(isnan.(linear_regression_gradient(lrl, x)))
-        @test !any(isnan.(linear_regression_hessian(lrl, x)))
+        lro = LinearRegressionOracle(A, b)
+        @test !isnan(value(lro, x))
+        @test !any(isnan.(gradient(lro, x)))
+        @test !any(isnan.(hessian(lro, x)))
         
         # Test with zero parameters
         x_zero = zeros(2)
-        @test !isnan(linear_regression_loss(lrl, x_zero))
-        @test !any(isnan.(linear_regression_gradient(lrl, x_zero)))
+        @test !isnan(value(lro, x_zero))
+        @test !any(isnan.(gradient(lro, x_zero)))
         
         # Test with large regularization
-        lrl_large_reg = LinearRegressionLoss(A, b, l1=1000.0, l2=1000.0)
-        @test !isnan(linear_regression_loss(lrl_large_reg, x))
-        @test !any(isnan.(linear_regression_gradient(lrl_large_reg, x)))
+        lro_large_reg = LinearRegressionOracle(A, b, l1=1000.0, l2=1000.0)
+        @test !isnan(value(lro_large_reg, x))
+        @test !any(isnan.(gradient(lro_large_reg, x)))
+        
+        # Test with very small regularization
+        lro_small_reg = LinearRegressionOracle(A, b, l1=1e-12, l2=1e-12)
+        @test !isnan(value(lro_small_reg, x))
+        @test !any(isnan.(gradient(lro_small_reg, x)))
+    end
+    
+    @testset "Memory and Performance" begin
+        # Test that large problems don't cause memory issues
+        n, d = 1000, 100
+        A = randn(n, d) / sqrt(d)
+        b = randn(n)
+        x = randn(d)
+        
+        lro = LinearRegressionOracle(A, b, l2=0.01)
+        
+        # These should complete without error
+        @test !isnan(value(lro, x))
+        @test !any(isnan.(gradient(lro, x)))
+        
+        # Test stochastic gradient with large batch
+        stoch_grad = stochastic_gradient(lro, x, nothing, batch_size=100)
+        @test length(stoch_grad) == d
+        @test !any(isnan.(stoch_grad))
     end
 end
 
-println("All tests passed! ✓")
+println("All linear regression tests passed! ✓")

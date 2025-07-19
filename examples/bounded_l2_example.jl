@@ -9,7 +9,6 @@ using LinearAlgebra
 using Random
 using Statistics
 
-# Include Joptan package
 using Joptan
 
 # Set random seed for reproducibility
