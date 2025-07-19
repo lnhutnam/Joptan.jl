@@ -14,8 +14,9 @@ include("log_sum_exp.jl")
 include("regularizer.jl")
 include("utils.jl")
 
-# Export linear regression functions
-export LinearRegressionLoss
-export linear_regression_loss, linear_regression_gradient, linear_regression_hessian
-export linear_regression_stochastic_gradient
-export linear_regression_smoothness, linear_regression_max_smoothness, linear_regression_average_smoothness
+
+
+
+
+
+
